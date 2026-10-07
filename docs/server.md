@@ -105,6 +105,7 @@ sudo -u douyin-sender nano config.json
   "prevent_duplicates": false
 }
 ```
+如需每天发送编程名言，将配置中的 `daily_quote` 设为 `true`；启用后 `messages` 仅作为结构占位，不会发送其中的固定内容。
 
 ---
 

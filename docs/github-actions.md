@@ -119,6 +119,14 @@ Send Douyin Messages
   "prevent_duplicates": false
 }
 ```
+如需每天发送编程名言，将配置中的 `daily_quote` 设为 `true`，并建议同时配置 `daily_quote_fallback`，例如：
+
+```json
+"daily_quote": true,
+"daily_quote_fallback": "续火花 ✨"
+```
+
+API 正常时发送当天名言；API 暂时不可用时发送回退消息。配置中的好友名单必须放在 `DOUYIN_CONFIG` Secret 中，不能只保存在本地 `config.json`。
 
 第一次使用建议先只配置：
 
@@ -249,50 +257,17 @@ dry_run = false
 
 ---
 
-## 8. 使用外部 Cron 自动运行
+## 8. 使用 GitHub Actions 自带定时
 
-GitHub Actions 自带的 `schedule` 定时任务有时可能出现延迟。可以使用免费的外部定时服务 **[cron-job.org](https://cron-job.org/)**，每天定时调用 GitHub API 来启动本项目。
+当前 `send.yml` 已启用每日定时：每天北京时间 08:00（UTC 00:00）运行一次。任务执行在 GitHub-hosted Runner 上，不需要自己的服务器，也不需要电脑保持开机。
 
-这种方式仍然：
+GitHub 的 `schedule` 可能出现延迟；如果当天没有按时触发，可在 Actions 页面手动运行，或改用外部 Cron 触发 `workflow_dispatch`。
 
-- 不需要服务器；
-- 不需要电脑保持开机；
-- 程序仍然运行在 GitHub Actions；
-- cron-job.org 只负责到时间后触发工作流。
+若使用外部 Cron，必须先把 `send.yml` 中的 `schedule` 注释掉，避免 GitHub 自带定时和外部 Cron 同时触发，导致一天运行两次。
 
-整体流程：
+无论使用哪种触发方式，首次都应先手动开启 `dry_run=true` 验证 Cookie、登录状态和好友定位，再关闭 Dry Run 执行真实发送。
 
-```text
-cron-job.org
-      ↓
-GitHub API
-      ↓
-workflow_dispatch
-      ↓
-GitHub Actions 运行发送任务
-```
-
-### 8.1 确认工作流支持外部触发
-
-打开 `.github/workflows/send.yml`，确保 `on:` 中存在：
-
-```yaml
-on:
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Only verify login and friends without sending
-        type: boolean
-        default: false
-```
-
-本项目已经默认支持，一般不需要修改。
-
-如果 `send.yml` 中还启用了 `schedule`，建议将它注释或删除，只保留 `workflow_dispatch`。否则 GitHub 自带定时和外部 Cron 可能同时触发，导致一天运行两次。
-
-> 当前项目中的 `schedule` 已经默认注释，直接配置外部 Cron 即可。
-
-### 8.2 创建 GitHub Token
+### 8.2 外部 Cron：创建 GitHub Token
 
 cron-job.org 调用 GitHub API 时需要 GitHub Token。
 

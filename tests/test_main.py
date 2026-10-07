@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -5,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.browser import AuthenticationError
+from app.quotes import QuoteError
 from app.models import Message, Settings, Target, TaskConfig
 import app.main as main_module
 
@@ -149,3 +152,80 @@ async def test_waits_between_consecutive_messages_for_same_friend(monkeypatch, t
     assert await main_module.run() == 0
     assert send_message.await_count == 2
     assert sleeps == [0.5]
+
+@pytest.mark.asyncio
+async def test_daily_quote_mode_sends_one_fetched_quote_to_each_target(monkeypatch, tmp_path) -> None:
+    settings = _settings(tmp_path)
+    task = replace(_task(), daily_quote=True)
+    page = MagicMock()
+    session = SimpleNamespace(page=page, context=MagicMock())
+
+    @asynccontextmanager
+    async def fake_open_douyin(_settings):
+        yield session
+
+    history = MagicMock()
+    history.run_date.return_value = "2026-08-09"
+    chat = MagicMock()
+    chat.open_target = AsyncMock()
+    send_message = AsyncMock()
+    fetch_quote = MagicMock(return_value="Simplicity is prerequisite for reliability.\n—— Edsger W. Dijkstra")
+
+    monkeypatch.setattr(main_module, "load_settings", lambda _env=None: settings)
+    monkeypatch.setattr(main_module, "load_task", lambda _settings: task)
+    monkeypatch.setattr(main_module, "fetch_daily_quote", fetch_quote)
+    monkeypatch.setattr(main_module, "History", MagicMock(return_value=history))
+    monkeypatch.setattr(main_module, "open_douyin", fake_open_douyin)
+    monkeypatch.setattr(main_module, "open_private_messages", AsyncMock())
+    monkeypatch.setattr(main_module, "DouyinChat", MagicMock(return_value=chat))
+    monkeypatch.setattr(main_module, "verify_login", AsyncMock())
+    monkeypatch.setattr(main_module, "send_message", send_message)
+    monkeypatch.setattr(main_module, "_screenshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(main_module, "_write_results", MagicMock())
+    monkeypatch.setattr(main_module, "_notify_dingtalk", AsyncMock())
+    monkeypatch.setattr(main_module, "_configure_logging", lambda _path, _aliases=None: None)
+
+    assert await main_module.run() == 0
+
+    fetch_quote.assert_called_once_with("Asia/Shanghai")
+    assert [call.args[2] for call in send_message.await_args_list] == [
+        Message(type="text", content="Simplicity is prerequisite for reliability.\n—— Edsger W. Dijkstra"),
+        Message(type="text", content="Simplicity is prerequisite for reliability.\n—— Edsger W. Dijkstra"),
+    ]
+
+@pytest.mark.asyncio
+async def test_daily_quote_mode_uses_fallback_when_quote_fetch_fails(monkeypatch, tmp_path) -> None:
+    settings = _settings(tmp_path)
+    task = replace(_task(), daily_quote=True, daily_quote_fallback="续火花 ✨")
+    page = MagicMock()
+    session = SimpleNamespace(page=page, context=MagicMock())
+
+    @asynccontextmanager
+    async def fake_open_douyin(_settings):
+        yield session
+
+    history = MagicMock()
+    history.run_date.return_value = "2026-08-09"
+    chat = MagicMock()
+    chat.open_target = AsyncMock()
+    send_message = AsyncMock()
+
+    monkeypatch.setattr(main_module, "load_settings", lambda _env=None: settings)
+    monkeypatch.setattr(main_module, "load_task", lambda _settings: task)
+    monkeypatch.setattr(main_module, "fetch_daily_quote", MagicMock(side_effect=QuoteError("源不可用")))
+    monkeypatch.setattr(main_module, "History", MagicMock(return_value=history))
+    monkeypatch.setattr(main_module, "open_douyin", fake_open_douyin)
+    monkeypatch.setattr(main_module, "open_private_messages", AsyncMock())
+    monkeypatch.setattr(main_module, "DouyinChat", MagicMock(return_value=chat))
+    monkeypatch.setattr(main_module, "verify_login", AsyncMock())
+    monkeypatch.setattr(main_module, "send_message", send_message)
+    monkeypatch.setattr(main_module, "_screenshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(main_module, "_write_results", MagicMock())
+    monkeypatch.setattr(main_module, "_notify_dingtalk", AsyncMock())
+    monkeypatch.setattr(main_module, "_configure_logging", lambda _path, _aliases=None: None)
+
+    assert await main_module.run() == 0
+    assert [call.args[2] for call in send_message.await_args_list] == [
+        Message(type="text", content="续火花 ✨"),
+        Message(type="text", content="续火花 ✨"),
+    ]

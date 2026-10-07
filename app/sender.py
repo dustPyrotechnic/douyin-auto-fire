@@ -22,6 +22,7 @@ def _monotonic() -> float:
 
 
 SEND_BUTTONS = (
+    '.e2e-send-msg-btn',
     '[class*="messageMsgInputpublishBtn"]',
     '.e2e-send-msg-bt',
     'button[aria-label*="发送"]',
@@ -141,22 +142,33 @@ async def send_text(chat: DouyinChat, content: str) -> None:
     page = editor.page
     await editor.click()
     await page.keyboard.insert_text(content)
-    try:
-        await page.wait_for_function(
-            """([txt]) => {
-                const es = [...document.querySelectorAll('[class*=messageEditor] [contenteditable=true], .messageEditorinputArea')];
-                return es.some(e => (e.innerText || '').includes(txt));
-            }""",
-            arg=[content],
-            timeout=5_000,
-        )
-    except Exception as exc:
-        raise PageOperationError("文字未能写入聊天输入框") from exc
+    await _wait_for_editor_content(editor, content)
 
     before = await _mark_latest_outgoing_message(page)
     await page.wait_for_timeout(300)
     await _trigger_send(page)
     await _confirm_outgoing_message(page, before, label="文字", expected_text=content)
+
+
+def _normalize_editor_text(value: str) -> str:
+    """Remove invisible markers that Douyin inserts at editor line ends."""
+    return value.translate(str.maketrans("", "", "\u200b\u200c\u200d\ufeff"))
+
+
+async def _wait_for_editor_content(editor: Locator, content: str, timeout_ms: int = 5_000) -> None:
+    expected = _normalize_editor_text(content)
+    deadline = _monotonic() + timeout_ms / 1000
+    while True:
+        try:
+            actual = _normalize_editor_text(await editor.inner_text()).strip()
+            if expected in actual:
+                return
+        except Exception:
+            pass
+        remaining_ms = int((deadline - _monotonic()) * 1000)
+        if remaining_ms <= 0:
+            raise PageOperationError("文字未能写入聊天输入框")
+        await editor.page.wait_for_timeout(min(100, remaining_ms))
 
 
 async def send_image(page: Page, image_path: str) -> None:

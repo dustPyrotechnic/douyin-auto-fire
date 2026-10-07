@@ -85,6 +85,15 @@ def load_task(settings: Settings) -> TaskConfig:
     )
     if target_open_timeout_seconds <= 0:
         raise ConfigError("target_open_timeout_seconds 必须大于 0")
+    daily_quote = raw.get("daily_quote", False)
+    if not isinstance(daily_quote, bool):
+        raise ConfigError("daily_quote 必须是布尔值")
+
+    daily_quote_fallback_raw = raw.get("daily_quote_fallback")
+    if daily_quote_fallback_raw is not None and not isinstance(daily_quote_fallback_raw, str):
+        raise ConfigError("daily_quote_fallback 必须是字符串")
+    daily_quote_fallback = _optional_string(daily_quote_fallback_raw)
+
     task = TaskConfig(
         task_id=_non_empty_string(raw.get("task_id", "daily-streak"), "task_id"),
         timezone=_non_empty_string(raw.get("timezone", "Asia/Shanghai"), "timezone"),
@@ -96,6 +105,8 @@ def load_task(settings: Settings) -> TaskConfig:
         prevent_duplicates=raw.get("prevent_duplicates", False),
         target_open_retries=target_open_retries,
         target_open_timeout_seconds=target_open_timeout_seconds,
+        daily_quote=daily_quote,
+        daily_quote_fallback=daily_quote_fallback,
     )
     if not isinstance(task.continue_on_error, bool):
         raise ConfigError("continue_on_error 必须是布尔值")

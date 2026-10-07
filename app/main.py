@@ -14,11 +14,12 @@ from pathlib import Path
 
 from app.browser import AuthenticationError, RiskControlError, SearchBoxNotReadyError, open_douyin, open_private_messages, save_trace, verify_login
 from app.config import ConfigError, load_settings, load_task
+from app.quotes import QuoteError, fetch_daily_quote
 from app.douyin import DouyinChat, PageOperationError
 from app.errors import classify_error, get_retry_strategy, should_stop_all_tasks
 from app.history import AlreadyRunningError, History, run_lock
 from app.metrics import Metrics, HistoricalMetrics, format_metrics_summary
-from app.models import Settings, TargetResult
+from app.models import Message, Settings, TargetResult
 from app.notifier import send_dingtalk_notification, send_webhook_notification
 from app.privacy import RedactingFormatter, build_target_aliases, redact_text, target_alias
 from app.progress import create_single_run_progress
@@ -37,6 +38,17 @@ async def run(dry_run: bool = False, env_file: str | None = None) -> int:
 
     if not settings.storage_state and not settings.cookie:
         raise ConfigError("必须配置 DOUYIN_STORAGE_STATE 或 DOUYIN_COOKIE")
+    daily_message = None
+    if task.daily_quote:
+        try:
+            quote = fetch_daily_quote(task.timezone)
+        except QuoteError:
+            if not task.daily_quote_fallback:
+                raise
+            LOGGER.warning("每日编程名言不可用，使用配置的回退消息")
+            quote = task.daily_quote_fallback
+        daily_message = Message(type="text", content=quote)
+
 
     # 初始化监控指标
     metrics = Metrics()
@@ -98,9 +110,10 @@ async def run(dry_run: bool = False, env_file: str | None = None) -> int:
 
                         # 使用智能重试策略打开目标
                         await _open_target_with_retry(chat, target.name, task.target_open_retries)
+                        messages = (daily_message,) if daily_message is not None else target.messages
 
                         if not dry_run:
-                            for message_index, message in enumerate(target.messages):
+                            for message_index, message in enumerate(messages):
                                 message_id = _message_id(message_index, message)
                                 key = history.key(task.task_id, run_date, target.name, message_id)
 
@@ -127,7 +140,7 @@ async def run(dry_run: bool = False, env_file: str | None = None) -> int:
                                     history.mark_success(key)
                                 sent += 1
 
-                                if message_index < len(target.messages) - 1:
+                                if message_index < len(messages) - 1:
                                     await asyncio.sleep(random.uniform(task.interval_min, task.interval_max))
 
                         # 记录目标成功

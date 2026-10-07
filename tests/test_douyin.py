@@ -294,6 +294,20 @@ def _chat_page(
     page.locator.side_effect = locator_router
     return page
 
+@pytest.mark.asyncio
+async def test_message_input_uses_selector_stable_after_placeholder_disappears() -> None:
+    page = MagicMock()
+    empty = _locator_group([])
+    stable_editor = MagicMock(name="stable-editor")
+    stable_editor.count = AsyncMock(return_value=1)
+    stable_editor.is_visible = AsyncMock(return_value=True)
+    stable_editor.wait_for = AsyncMock()
+    page.locator.side_effect = lambda selector: _locator_group([stable_editor]) if selector == MESSAGE_INPUTS[0] else empty
+
+    editor = await DouyinChat(page).message_input()
+
+    assert editor is stable_editor
+
 
 @pytest.mark.asyncio
 async def test_chat_open_error_accepts_exact_name_in_each_header_fallback() -> None:

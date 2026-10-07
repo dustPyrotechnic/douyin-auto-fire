@@ -13,6 +13,7 @@ from app.sender import (
     SEND_PENDING_MARKERS,
     SEND_RETRY_MARKERS,
     _await_send_terminal_state,
+    _wait_for_editor_content,
     _click_and_confirm_sticker,
     _confirm_outgoing_message,
     _confirm_sticker_sent,
@@ -195,7 +196,9 @@ class _FakePage:
 
 @pytest.mark.asyncio
 async def test_random_message_delegates_to_selected_choice(monkeypatch) -> None:
-    editor = AsyncMock()
+    editor = MagicMock()
+    editor.click = AsyncMock()
+    editor.inner_text = AsyncMock(return_value="你好")
     page = MagicMock()
     message_items = MagicMock()
     message_items.count = AsyncMock(return_value=0)
@@ -236,6 +239,26 @@ async def test_trigger_send_clicks_publish_button_when_visible() -> None:
     missing_first.count = AsyncMock(return_value=0)
     missing_loc.first = missing_first
     page.locator.side_effect = lambda selector: publish if selector == SEND_BUTTONS[0] else missing_loc
+
+    await _trigger_send(page)
+
+    button.click.assert_awaited_once_with()
+    page.keyboard.press.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_trigger_send_clicks_douyin_send_button_class() -> None:
+    page = MagicMock()
+    page.keyboard.press = AsyncMock()
+    button = MagicMock()
+    button.count = AsyncMock(return_value=1)
+    button.is_visible = AsyncMock(return_value=True)
+    button.click = AsyncMock()
+    missing = MagicMock()
+    missing.count = AsyncMock(return_value=0)
+    missing.is_visible = AsyncMock(return_value=False)
+    publish = MagicMock(first=button)
+    other = MagicMock(first=missing)
+    page.locator.side_effect = lambda selector: publish if selector == ".e2e-send-msg-btn" else other
 
     await _trigger_send(page)
 
@@ -451,6 +474,7 @@ async def test_send_text_confirms_outgoing_message_without_retry(monkeypatch) ->
     page.wait_for_timeout = AsyncMock()
     editor = MagicMock()
     editor.click = AsyncMock()
+    editor.inner_text = AsyncMock(return_value="你好")
     editor.page = page
     chat = MagicMock()
     chat.message_input = AsyncMock(return_value=editor)
@@ -486,6 +510,7 @@ async def test_send_text_raises_when_confirmation_fails(monkeypatch) -> None:
     page.wait_for_timeout = AsyncMock()
     editor = MagicMock()
     editor.click = AsyncMock()
+    editor.inner_text = AsyncMock(return_value="你好")
     editor.page = page
     chat = MagicMock()
     chat.message_input = AsyncMock(return_value=editor)
@@ -500,6 +525,37 @@ async def test_send_text_raises_when_confirmation_fails(monkeypatch) -> None:
 
     with pytest.raises(PageOperationError, match="没有检测到新的已发送消息"):
         await send_text(chat, "你好")
+
+@pytest.mark.asyncio
+async def test_send_text_verifies_the_editor_that_received_text(monkeypatch) -> None:
+    page = MagicMock()
+    page.keyboard.insert_text = AsyncMock()
+    page.wait_for_function = AsyncMock(side_effect=TimeoutError("旧页面选择器未命中"))
+    page.wait_for_timeout = AsyncMock()
+    editor = MagicMock()
+    editor.click = AsyncMock()
+    editor.inner_text = AsyncMock(return_value="你好")
+    editor.page = page
+    chat = MagicMock()
+    chat.message_input = AsyncMock(return_value=editor)
+
+    monkeypatch.setattr("app.sender._mark_latest_outgoing_message", AsyncMock(return_value=("anchor", "")))
+    monkeypatch.setattr("app.sender._trigger_send", AsyncMock())
+    monkeypatch.setattr("app.sender._confirm_outgoing_message", AsyncMock())
+
+    await send_text(chat, "你好")
+
+    editor.inner_text.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_editor_content_ignores_zero_width_characters(monkeypatch) -> None:
+    editor = MagicMock()
+    editor.inner_text = AsyncMock(return_value="Every line.\u200b\n—— Author\u200b")
+    clock = iter((0.0, 1.0))
+    monkeypatch.setattr(sender_module, "_monotonic", lambda: next(clock))
+
+    await _wait_for_editor_content(editor, "Every line.\n—— Author", timeout_ms=1)
 
 
 @pytest.mark.asyncio

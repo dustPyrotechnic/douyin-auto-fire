@@ -32,6 +32,7 @@ CHAT_PANEL_MARKERS = (
     '[class*="MessagePanel"]',
 )
 MESSAGE_INPUTS = (
+    '[contenteditable="true"][class*="messageEditorinputArea"]',
     '[data-contents="true"]',
     '.DraftEditor-editor [contenteditable="true"]',
     '.DraftEditor-root [contenteditable="true"]',

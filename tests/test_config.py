@@ -100,6 +100,59 @@ def test_loads_simple_config(tmp_path: Path) -> None:
     assert len(task.targets) == 2
     assert task.targets[1].messages[0].content == "你好"
 
+def test_loads_daily_quote_mode(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        {
+            "targets": [{"name": "好友A", "messages": [{"type": "text", "content": "旧消息"}]}],
+            "daily_quote": True,
+        },
+    )
+
+    task = load_task(settings_for(path))
+
+    assert task.daily_quote is True
+
+def test_loads_daily_quote_fallback(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        {
+            "targets": [{"name": "好友A", "messages": [{"type": "text", "content": "旧消息"}]}],
+            "daily_quote": True,
+            "daily_quote_fallback": "续火花 ✨",
+        },
+    )
+
+    task = load_task(settings_for(path))
+
+    assert task.daily_quote_fallback == "续火花 ✨"
+
+
+def test_rejects_non_string_daily_quote_fallback(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        {
+            "targets": [{"name": "好友A", "messages": [{"type": "text", "content": "你好"}]}],
+            "daily_quote_fallback": ["续火花 ✨"],
+        },
+    )
+
+    with pytest.raises(ConfigError, match="daily_quote_fallback 必须是字符串"):
+        load_task(settings_for(path))
+
+
+def test_rejects_non_boolean_daily_quote(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        {
+            "targets": [{"name": "好友A", "messages": [{"type": "text", "content": "你好"}]}],
+            "daily_quote": "true",
+        },
+    )
+
+    with pytest.raises(ConfigError, match="daily_quote 必须是布尔值"):
+        load_task(settings_for(path))
+
 
 def test_loads_target_open_retries_and_timeout(tmp_path: Path) -> None:
     path = write_config(

@@ -22,6 +22,7 @@
 - ⏰ **定时自动发送**：支持 GitHub Actions、Docker Cron、systemd Timer 等方式定时运行
 - 💬 **多种消息类型**：支持文字、图片（PNG/JPG/GIF/WebP）和抖音原生表情
 - 🎲 **随机消息**：支持从多条候选消息中随机选择
+- 🧠 **每日编程名言**：按任务时区每天选择一条编程名言，作为文字消息发送
 - 👥 **多好友支持**：可以同时为多个好友配置发送任务
 - 👤 **多账号支持**：GitHub Actions 当前最多支持 5 个抖音账号
 - 🧪 **Dry Run 模式**：只验证登录状态和好友定位，不真实发送消息
@@ -71,6 +72,27 @@ docker compose up -d
 支持直接运行项目自带的扫码登录脚本生成 `storage-state.json`，也可以使用 Cookie，并可通过 Windows 任务计划程序每天自动运行。
 
 > 第一次使用无论选择哪种部署方式，都建议先配置 **1 个账号 + 1 个好友 + 1 条文字消息**，先执行 Dry Run，确认正常后再真实发送和增加其他配置。
+
+### 🧠 每日编程名言
+
+在任务配置中启用：
+
+```json
+{
+  "daily_quote": true,
+  "daily_quote_fallback": "续火花 ✨"
+}
+```
+
+启用后，每次任务运行会从 [programming-quotes-api](https://github.com/mudroljub/programming-quotes-api) 的公开 JSON 数据中读取名言，按任务时区的日期稳定选择一条，并向每个目标发送：
+数据文件地址：`https://raw.githubusercontent.com/mudroljub/programming-quotes-api/master/data/quotes.json`
+
+```text
+名言原文
+—— 作者
+```
+
+每日名言模式会忽略目标配置中的 `messages`，每个目标每天发送一条相同名言。如果 API 请求失败，则使用 `daily_quote_fallback`；未配置回退消息时，任务会终止而不会发送未知内容。默认值为 `false`。
 
 ## 📢 通知配置
 
