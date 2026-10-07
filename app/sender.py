@@ -150,8 +150,12 @@ async def send_text(chat: DouyinChat, content: str) -> None:
     before = await _mark_latest_outgoing_message(page)
     await page.wait_for_timeout(300)
     await _trigger_send(page)
-    await _confirm_outgoing_message(page, before, label="文字", expected_text=content)
-
+    try:
+        await _confirm_outgoing_message(page, before, label="文字", expected_text=content)
+    except PageOperationError as exc:
+        if "页面提示可以重试" not in str(exc) or not await _click_retry_on_latest_failed_message(page):
+            raise
+        await _confirm_outgoing_message(page, before, label="文字", expected_text=content)
 
 def _normalize_editor_text(value: str) -> str:
     """Remove invisible markers that Douyin inserts at editor line ends."""

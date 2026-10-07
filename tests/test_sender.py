@@ -502,6 +502,39 @@ async def test_send_text_confirms_outgoing_message_without_retry(monkeypatch) ->
     assert calls["trigger"] == 1
     assert calls["confirm"] == 1
 
+@pytest.mark.asyncio
+async def test_send_text_retries_explicit_page_retry_marker(monkeypatch) -> None:
+    page = MagicMock()
+    page.keyboard.insert_text = AsyncMock()
+    page.wait_for_function = AsyncMock()
+    page.wait_for_timeout = AsyncMock()
+    editor = MagicMock()
+    editor.click = AsyncMock()
+    editor.inner_text = AsyncMock(return_value="你好")
+    editor.page = page
+    chat = MagicMock()
+    chat.message_input = AsyncMock(return_value=editor)
+    calls = {"confirm": 0}
+
+    monkeypatch.setattr("app.sender._mark_latest_outgoing_message", AsyncMock(return_value=("anchor", "old-content")))
+    monkeypatch.setattr("app.sender._trigger_send", AsyncMock())
+    retry = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.sender._click_retry_on_latest_failed_message", retry)
+
+    async def confirm(_page, before, label, resource_key="", expected_text=""):
+        calls["confirm"] += 1
+        assert before == ("anchor", "old-content")
+        assert label == "文字"
+        assert expected_text == "你好"
+        if calls["confirm"] == 1:
+            raise PageOperationError("文字发送失败，页面提示可以重试")
+
+    monkeypatch.setattr("app.sender._confirm_outgoing_message", confirm)
+
+    await send_text(chat, "你好")
+
+    assert calls["confirm"] == 2
+    retry.assert_awaited_once_with(page)
 
 @pytest.mark.asyncio
 async def test_send_text_raises_when_confirmation_fails(monkeypatch) -> None:
