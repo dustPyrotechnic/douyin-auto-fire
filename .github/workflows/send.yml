@@ -7,9 +7,10 @@ on:
         description: Only verify login and friends without sending
         type: boolean
         default: false
-  # 每天北京时间 08:00（UTC 00:00）运行；也可在 Actions 页面手动触发。
-  schedule:
-    - cron: "0 0 * * *"
+  # 暂停自动定时：GitHub-hosted Runner 的真实发送验证失败。
+  # 确认运行环境可发送后，再恢复 schedule。
+  # schedule:
+  #   - cron: "0 0 * * *"
 
 concurrency:
   group: douyin-daily-sender
