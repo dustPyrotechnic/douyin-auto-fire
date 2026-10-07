@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -633,6 +634,25 @@ async def test_confirm_failure_immediate() -> None:
 
     with pytest.raises(PageOperationError, match="发送失败"):
         await _confirm_outgoing_message(page, ("anchor", "old"), "文字", expected_text="测试文字")
+
+
+@pytest.mark.asyncio
+async def test_confirm_failure_logs_phase_and_selector_without_payload(caplog) -> None:
+    timeline = _Timeline([(True, False)])
+    page = _FakePage(timeline)
+
+    with caplog.at_level(logging.INFO, logger="douyin_sender"):
+        with pytest.raises(PageOperationError, match="发送失败"):
+            await _confirm_outgoing_message(
+                page,
+                ("anchor", "old"),
+                "文字",
+                expected_text="private diagnostic payload",
+            )
+
+    assert "phase=initial" in caplog.text
+    assert f"marker={SEND_FAILURE_MARKERS[0]}" in caplog.text
+    assert "private diagnostic payload" not in caplog.text
 
 
 @pytest.mark.asyncio

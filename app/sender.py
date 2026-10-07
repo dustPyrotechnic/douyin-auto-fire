@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import secrets
 from urllib.parse import urlsplit
@@ -10,6 +11,9 @@ from playwright.async_api import Locator, Page
 from app.douyin import DouyinChat, PageOperationError, first_visible
 from app.models import Message, Sticker
 from app.selectors import IMAGE_INPUTS, MESSAGE_INPUTS, STICKER_BUTTONS, STICKER_PANELS
+
+
+LOGGER = logging.getLogger("douyin_sender")
 
 
 def _monotonic() -> float:
@@ -31,19 +35,18 @@ SEND_BUTTONS = (
 
 
 async def _trigger_send(page: Page) -> None:
-    button = None
     for selector in SEND_BUTTONS:
         candidate = page.locator(selector).first
         try:
-            if await candidate.count() and await candidate.is_visible():
-                button = candidate
-                break
+            visible = await candidate.count() and await candidate.is_visible()
         except Exception:
             continue
-    if button is not None:
-        await button.click()
-    else:
-        await page.keyboard.press("Enter")
+        if visible:
+            await candidate.click()
+            LOGGER.info("发送动作已触发: control=button, selector=%s", selector)
+            return
+    await page.keyboard.press("Enter")
+    LOGGER.info("发送动作已触发: control=keyboard-enter")
 
 
 async def _publish_ready(page: Page) -> bool:
@@ -334,20 +337,16 @@ async def _click_retry_on_latest_failed_message(page: Page) -> bool:
     return False
 
 
-async def _marker_visible(scope: Locator, selectors: tuple[str, ...]) -> bool:
-    """True if any selector in ``selectors`` resolves to a visible element.
-
-    Scoped to ``scope`` (the single outgoing message) so unrelated page-wide
-    spinners cannot influence the verdict.
-    """
+async def _visible_marker_selector(scope: Locator, selectors: tuple[str, ...]) -> str | None:
+    """Return the first visible status selector without reading page text."""
     for selector in selectors:
         marker = scope.locator(selector).first
         try:
             if await marker.count() and await marker.is_visible():
-                return True
+                return selector
         except Exception:
             continue
-    return False
+    return None
 
 
 async def _await_send_terminal_state(
@@ -395,36 +394,49 @@ async def _await_send_terminal_state(
     grace_deadline = _monotonic() + SEND_INITIAL_CLEAN_GRACE_MS / 1000
     while _monotonic() < grace_deadline:
         if _monotonic() >= deadline:
+            LOGGER.error("发送终态超时: phase=initial, timeout_ms=%d", timeout_ms)
             raise PageOperationError(
                 f"{label}发送状态未能确认（发送超时或状态不确定），为避免重复不会自动重试"
             )
-        if await _marker_visible(scope, SEND_FAILURE_MARKERS):
+        failure_marker = await _visible_marker_selector(scope, SEND_FAILURE_MARKERS)
+        if failure_marker:
+            LOGGER.error("发送终态失败: phase=initial, marker=%s", failure_marker)
             raise PageOperationError(f"{label}发送失败，页面提示可以重试")
-        if await _marker_visible(scope, SEND_PENDING_MARKERS):
+        pending_marker = await _visible_marker_selector(scope, SEND_PENDING_MARKERS)
+        if pending_marker:
+            LOGGER.info("发送状态待处理: phase=initial, marker=%s", pending_marker)
             break  # -> resolve pending in Phase 2
         await page.wait_for_timeout(SEND_POLL_INTERVAL_MS)
     else:
         # Grace window elapsed fully clean -> fast success (normal fast send).
+        LOGGER.info("发送终态确认成功: phase=initial-clean")
         return
 
     # Phase 2: a spinner appeared. Wait for it to clear (or flip to failure),
     # then require a stable clean window before success.
     while True:
         if _monotonic() >= deadline:
+            LOGGER.error("发送终态超时: phase=pending, timeout_ms=%d", timeout_ms)
             raise PageOperationError(
                 f"{label}发送状态未能确认（发送超时或状态不确定），为避免重复不会自动重试"
             )
-        if await _marker_visible(scope, SEND_FAILURE_MARKERS):
+        failure_marker = await _visible_marker_selector(scope, SEND_FAILURE_MARKERS)
+        if failure_marker:
+            LOGGER.error("发送终态失败: phase=pending, marker=%s", failure_marker)
             raise PageOperationError(f"{label}发送失败，页面提示可以重试")
-        if not await _marker_visible(scope, SEND_PENDING_MARKERS):
+        pending_marker = await _visible_marker_selector(scope, SEND_PENDING_MARKERS)
+        if not pending_marker:
             # Spinner gone. Require it to STAY clear across the stable window --
             # the retry marker can mount a tick after the spinner disappears.
             await page.wait_for_timeout(SEND_STABLE_INTERVAL_MS)
-            if await _marker_visible(scope, SEND_FAILURE_MARKERS):
+            failure_marker = await _visible_marker_selector(scope, SEND_FAILURE_MARKERS)
+            if failure_marker:
+                LOGGER.error("发送终态失败: phase=stabilizing, marker=%s", failure_marker)
                 raise PageOperationError(f"{label}发送失败，页面提示可以重试")
-            if not await _marker_visible(scope, SEND_PENDING_MARKERS):
+            pending_marker = await _visible_marker_selector(scope, SEND_PENDING_MARKERS)
+            if not pending_marker:
+                LOGGER.info("发送终态确认成功: phase=stable-after-pending")
                 return  # terminal: success
-            # spinner reappeared -> keep waiting
         await page.wait_for_timeout(SEND_POLL_INTERVAL_MS)
 
 
@@ -437,6 +449,7 @@ async def _confirm_outgoing_message(
 ) -> None:
     anchor, before_content = before
     try:
+        LOGGER.info("等待新发出消息气泡")
         await page.wait_for_function(
             """([selector, anchor, previousContent, expectedResource, expectedText]) => {
                 const message = document.querySelector(selector);
@@ -457,6 +470,7 @@ async def _confirm_outgoing_message(
             arg=[LATEST_OUTGOING_MESSAGE, anchor, before_content, resource_key, expected_text],
             timeout=15_000,
         )
+        LOGGER.info("新发出消息气泡已匹配，开始观察发送终态")
         # The bubble now matches our payload, but the send may still be in
         # flight or have already failed. Wait for a real terminal state rather
         # than treating a visible bubble as success (Issue #11).
